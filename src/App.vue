@@ -184,7 +184,6 @@ header>a:hover{
   height: 100%;
   width: 100%;
   position: fixed;
-  top: 0;
   opacity: 0;
   display: flex;
   flex-direction: column;
@@ -192,10 +191,12 @@ header>a:hover{
   align-items: center;
   font-size: 2rem;
   transition: .3s ease; 
-  z-index: 1;
+  z-index: -1;
 }
 .hamMenu.active {
   opacity: 80%;
+  top: 0;
+  z-index: 1;
 }
 .hamMenu>li{
   list-style-type: none;
