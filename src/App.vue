@@ -185,7 +185,7 @@ header>a:hover{
   width: 100%;
   position: fixed;
   top: 0;
-  right: -45rem;
+  opacity: 0;
   display: flex;
   flex-direction: column;
   justify-content:flex-start;
@@ -195,7 +195,7 @@ header>a:hover{
   z-index: 1;
 }
 .hamMenu.active {
-  right: 0;
+  opacity: 80%;
 }
 .hamMenu>li{
   list-style-type: none;
