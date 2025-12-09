@@ -190,7 +190,7 @@ header>a:hover{
   justify-content:flex-start;
   align-items: center;
   font-size: 2rem;
-  transition: .3s ease; 
+  transition: .2s ease; 
   z-index: -1;
 }
 .hamMenu.active {
@@ -200,7 +200,9 @@ header>a:hover{
 }
 .hamMenu>li{
   list-style-type: none;
-  margin-top: 4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 .hamMenu>li>a{
   text-decoration: none;
@@ -208,7 +210,10 @@ header>a:hover{
 }
 .hamMenu>li>a>ul{
   padding: 0;
-  margin: 4rem 0 4rem 0;
+  margin: 4rem 0 0 0;
+}
+.hamMenu>li>a:hover{
+  opacity: 50%;
 }
 #homeBtn{
   color: var(--orange);
