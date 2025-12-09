@@ -4,11 +4,15 @@ import { onMounted } from 'vue'
 onMounted(() => {
   const burgerMenu = document.querySelector('.burgerMenu')
   const hamMenu = document.querySelector('.hamMenu')
+  const profilePic = document.querySelector('#profilePic')
+  const LogoHeader = document.querySelector('#LogoHeader')
   
   if (burgerMenu) {
     burgerMenu.addEventListener('click', () => {
       burgerMenu.classList.toggle('active')
       hamMenu.classList.toggle('active')
+      profilePic.classList.toggle('active')
+      LogoHeader.classList.toggle('active')
     })
   }
 })
@@ -24,6 +28,7 @@ onMounted(() => {
     <a href="App.vue"><img src="/src/components/images/logo.svg" alt="лого" id="LogoHeader"></a>
     <a href="#"><img src="/src/components/images/profilepic.svg" alt="Профиль" id="profilePic"></a>
     <nav class="hamMenu">
+      <img src="/src/components/images/logo.svg" alt="лого" id="LogoBurgerMenu">
       <li>
         <a href="App.vue" ><ul id="homeBtn">Главная</ul></a>
         <a href="#"><ul>Редактор</ul></a>
@@ -111,6 +116,12 @@ p{
 #LogoHeader{
   height: 4.2rem;
 }
+#LogoHeader.active{
+  display: none;
+}
+#LogoBurgerMenu{
+  margin-top: 1rem;
+}
 header{
   min-height: 6rem;
   background-color: var(--dark_gray);
@@ -163,6 +174,9 @@ header>a:hover{
 #profilePic{
   margin-right: 1.4rem;
   height: 4.2rem;
+}
+#profilePic.active{
+  display: none;
 }
 .hamMenu{
   background-color: var(--dark_gray);
