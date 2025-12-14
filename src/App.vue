@@ -43,7 +43,7 @@ onMounted(() => {
         <img src="/src/components/images/slidingIcon.svg" alt="слайдер" class="sliderIco">
       </Button>
       <input type="text" placeholder="Введите название новеллы..." id="searchNovelInput">
-      <button id="searchBtn"><img src="/src/components/images/SearchBtn.svg" alt="Поиск" ></button>
+      <button id="searchBtn"><img src="/src/components/images/searchBtn.svg" alt="Поиск" ></button>
     </nav>
     <section id="continue">
       <h2>Продолжить игру</h2>
