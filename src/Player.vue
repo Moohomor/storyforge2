@@ -1,90 +1,514 @@
 <script setup>
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-const route = useRoute()
-const backendUrl = import.meta.env.VITE_BACKEND_URL
-const rawXML = ref('')
-const tree = ref(null)
-const nvars = reactive({choice: -1})
-const vars = reactive({'Engine.text': '', 'Engine.char': '', 'Engine.bg_name': ''})
-const state = ref(null)
-const answers = ref('')
 
-onMounted(async () => {
-	// const resp = await fetch(`${backendUrl}storage/story_content`, {
-	// 	method:'PUT',
-	// 	headers: {
-	// 		'Accept': 'application/json',
-	// 		'Content-Type': 'application/json' // This is crucial
-	// 	},
-	// 	body: JSON.stringify({
-	// 				"id": parseInt(route.params.id)
-	// 			})
-	// })
-	// rawXML.value = (await resp.json()).content
-	rawXML.value = `
+const route = useRoute()
+const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
+const rawXML = ref('')
+const storyTree = ref(null)
+const currentModule = ref(null)
+const currentPosition = ref(0)
+const executionStack = ref([])
+const nvars = reactive({}) // Numeric variables
+const vars = reactive({
+  'Engine.text': '', 
+  'Engine.char': '', 
+  'Engine.bg_name': 'https://media.greatbigphotographyworld.com/wp-content/uploads/2014/11/Landscape-Photography-steps.jpg'
+})
+
+class StoryElement {
+  constructor(element) {
+    this.element = element
+    this.children = []
+    this.parseChildren()
+  }
+
+  parseChildren() {
+    for (let i = 0; i < this.element.children.length; i++) {
+      const child = this.element.children[i]
+      const className = child.nodeName.toLowerCase()
+      
+      switch (className) {
+        case 'step':
+          this.children.push(new Step(child))
+          break
+        case 'tx':
+          this.children.push(new TX(child))
+          break
+        case 'char':
+          this.children.push(new Char(child))
+          break
+        case 'if':
+          this.children.push(new If(child))
+          break
+        case 'else':
+          this.children.push(new Else(child))
+          break
+        case 'set':
+          this.children.push(new Set(child))
+          break
+        case 'go':
+          this.children.push(new Go(child))
+          break
+        default:
+          console.warn(`Unknown element: ${className}`)
+          break
+      }
+    }
+  }
+
+  async exec(mod) {
+    console.log(`Executing ${this.constructor.name}`)
+    return true
+  }
+}
+
+class Module extends StoryElement {
+  constructor(element) {
+    super(element)
+    this.name = element.getAttribute('name') || 'main'
+  }
+
+  async executeNext() {
+    if (!this.children || currentPosition.value >= this.children.length) {
+      // End of module - check if we need to return
+      if (executionStack.value.length > 0) {
+        const returnPoint = executionStack.value.pop()
+        currentModule.value = mods.value[returnPoint.module]
+        currentPosition.value = returnPoint.position
+        console.log(`Returning to ${returnPoint.module} at position ${returnPoint.position}`)
+        return await currentModule.value.executeNext()
+      }
+      console.log('End of story reached')
+      vars['Engine.text'] = 'The end of the story.'
+      vars['Engine.char'] = ''
+      return false
+    }
+
+    const element = this.children[currentPosition.value]
+    console.log(`Executing position ${currentPosition.value}: ${element.constructor.name}`)
+    
+    const result = await element.exec(this)
+    
+    // Only increment position if the element didn't handle navigation itself
+    // AND if it's a step element (non-step elements execute immediately)
+    if (result !== false && !(element instanceof Step)) {
+      currentPosition.value++
+    }
+    
+    return true
+  }
+}
+
+class Step extends StoryElement {
+  async exec(mod) {
+    console.log('Executing step with children:', this.children.length)
+    // Execute all children in this step immediately
+    for (const child of this.children) {
+      await child.exec(mod)
+    }
+    // Don't auto-increment position - wait for user click
+    return false // Return false to prevent auto-increment
+  }
+}
+
+class TX extends StoryElement {
+  async exec(mod) {
+    vars['Engine.text'] = this.element.textContent.trim()
+    console.log('Text:', vars['Engine.text'])
+    return true
+  }
+}
+
+class Char extends StoryElement {
+  async exec(mod) {
+    vars['Engine.char'] = this.element.textContent.trim()
+    console.log('Character:', vars['Engine.char'])
+    return true
+  }
+}
+
+class Set extends StoryElement {
+  async exec(mod) {
+    const attributes = this.element.attributes
+    for (let i = 0; i < attributes.length; i++) {
+      const attr = attributes[i]
+      try {
+        // Try to parse as number, fall back to string
+        let value = attr.value
+        if (!isNaN(value) && value.trim() !== '') {
+          value = parseFloat(value)
+        }
+        nvars[attr.name] = value
+        console.log(`Set ${attr.name} =`, value, 'Type:', typeof value)
+      } catch (error) {
+        nvars[attr.name] = attr.value
+        console.log(`Set ${attr.name} =`, attr.value)
+      }
+    }
+    return true
+  }
+}
+
+class If extends StoryElement {
+  constructor(element) {
+    super(element)
+    this.condition = element.getAttribute('condition') || ''
+    this.elsePosition = -1
+    this.findBlocks(element)
+  }
+
+  findBlocks(element) {
+    // Find the corresponding else position
+    const parent = element.parentNode
+    for (let i = 0; i < parent.children.length; i++) {
+      if (parent.children[i] === element) {
+        // Look for the next else element at the same level
+        for (let j = i + 1; j < parent.children.length; j++) {
+          const child = parent.children[j]
+          const nodeName = child.nodeName.toLowerCase()
+          if (nodeName === 'else') {
+            this.elsePosition = j
+            break
+          } else if (nodeName === 'if') {
+            // Stop looking if we encounter another if (nested if-else not supported)
+            break
+          }
+        }
+        break
+      }
+    }
+  }
+
+  async exec(mod) {
+    try {
+      const conditionResult = this.evaluateCondition()
+      console.log(`If condition "${this.condition}" evaluated to:`, conditionResult)
+      
+      if (conditionResult) {
+        // Execute the content inside the if block
+        for (const child of this.children) {
+          await child.exec(mod)
+        }
+        // If we have an else block, we need to skip it
+        if (this.elsePosition !== -1) {
+          console.log(`Condition true, skipping else block at position ${this.elsePosition}`)
+          // Set position to after the else block
+          currentPosition.value = this.elsePosition // This will be incremented by Module.executeNext
+        }
+      } else {
+        // Skip to else block if it exists
+        if (this.elsePosition !== -1) {
+          console.log(`Condition false, jumping to else block at position ${this.elsePosition}`)
+          currentPosition.value = this.elsePosition - 1 // -1 because we'll increment after
+        } else {
+          // If there's no else block, just continue normally
+          // The position will be incremented by Module.executeNext
+        }
+      }
+      return true
+    } catch (error) {
+      console.error('Error evaluating condition:', this.condition, error)
+      return true
+    }
+  }
+
+  evaluateCondition() {
+    // Replace variable references with their actual values
+    let processedCondition = this.condition.replace(/\b[a-zA-Z_][a-zA-Z0-9_]*\b/g, (match) => {
+      if (match in nvars) {
+        return nvars[match]
+      }
+      return match
+    })
+    
+    try {
+      // Safer evaluation using Function constructor
+      return new Function(`return ${processedCondition}`)()
+    } catch (error) {
+      console.error('Error in condition evaluation:', processedCondition, error)
+      return false
+    }
+  }
+}
+
+class Else extends StoryElement {
+  async exec(mod) {
+    // Execute the content inside the else block
+    for (const child of this.children) {
+      await child.exec(mod)
+    }
+    return true
+  }
+}
+
+class Go extends StoryElement {
+  async exec(mod) {
+    const targetModule = this.element.getAttribute('to')
+    console.log(`Go to module: ${targetModule}`)
+    
+    // Save current position + 1 (next line after go) for return
+    executionStack.value.push({
+      module: currentModule.value.name,
+      position: currentPosition.value + 1
+    })
+    
+    if (mods.value[targetModule]) {
+      // Switch to target module
+      currentModule.value = mods.value[targetModule]
+      currentPosition.value = 0
+      console.log(`Transitioned to module "${targetModule}"`)
+      
+      // Execute the first step of the new module
+      await currentModule.value.executeNext()
+      
+      // Don't increment position - we've already executed the new module
+      return false
+    } else {
+      console.error(`Module not found: ${targetModule}`)
+      vars['Engine.text'] = `Error: Module "${targetModule}" not found`
+      return true
+    }
+  }
+}
+
+// Store all modules
+const mods = ref({})
+
+async function loadStory() {
+  try {
+    // Properly structured XML
+    rawXML.value = `
 <story>
   <module name="main">
     <step>
       <char>Daun</char>
-      <tx>lll</tx>
+      <tx>Hello! This is a test story.</tx>
     </step>
-    <set a="1"></set>
-    <if condition="a==1">
+    <step>
+      <set a="1"></set>
+      <tx>Variable a has been set to 1</tx>
+    </step>
+    <if condition="a == 1">
       <step>
         <char>Megadaun</char>
-        <tx>Not now</tx>
+        <tx>The condition is true!</tx>
       </step>
     </if>
     <else>
       <step>
-        <tx>Yep!</tx>
+        <tx>This would show if condition was false</tx>
       </step>
     </else>
     <step>
       <char></char>
-      <tx>Got it</tx>
+      <tx>Variable a = ${'{'}a{'}'}</tx>
+    </step>
+    <step>
+      <tx>Now going to the second module...</tx>
     </step>
     <go to="second"></go>
     <step>
-      <tx>Come back</tx>
+      <tx>We're back from the second module!</tx>
     </step>
   </module>
   <module name="second">
     <step>
-      <char>Not daun</char>
-      <tx>not lll</tx>
+      <char>Not Daun</char>
+      <tx>Welcome to the second module!</tx>
+    </step>
+    <step>
+      <set b="42"></set>
+      <tx>Variable b has been set to 42</tx>
+    </step>
+    <step>
+      <tx>Returning to main module...</tx>
     </step>
   </module>
 </story>
 `
-	tree.value = new DOMParser().parseFromString(rawXML.value, 'text/xml')
-	const error = tree.value.querySelector('parsererror')
-	if (error) {
-		console.error("Couldn't parse XML:\n", error.textContent)
-		alert('Не удалось запустить игру. Причина: проб...Показать больше')
-		return
-	}
+    
+    // Clear previous state
+    nvars.a = undefined
+    nvars.b = undefined
+    vars['Engine.text'] = ''
+    vars['Engine.char'] = ''
+    executionStack.value = []
+    currentPosition.value = 0
+    
+    storyTree.value = new DOMParser().parseFromString(rawXML.value, 'text/xml')
+    const error = storyTree.value.querySelector('parsererror')
+    if (error) {
+      throw new Error(`XML parsing error: ${error.textContent}`)
+    }
 
-	console.log(tree.value.children[0])
+    // Parse modules
+    const storyElement = storyTree.value.children[0]
+    mods.value = {}
+    
+    for (let i = 0; i < storyElement.children.length; i++) {
+      const moduleElement = storyElement.children[i]
+      if (moduleElement.nodeName.toLowerCase() === 'module') {
+        const module = new Module(moduleElement)
+        mods.value[module.name] = module
+        console.log(`Loaded module: ${module.name}`)
+      }
+    }
+
+    if (!mods.value.main) {
+      throw new Error('No main module found in story')
+    }
+
+    // Start execution from main module
+    currentModule.value = mods.value.main
+    console.log('Starting execution from main module')
+    await currentModule.value.executeNext()
+    
+  } catch (error) {
+    console.error('Error loading story:', error)
+    alert(`Failed to load story: ${error.message}`)
+    vars['Engine.text'] = `Error: ${error.message}`
+  }
+}
+
+function nextStep() {
+  console.log('--- Next Step Clicked ---')
+  console.log('Current module:', currentModule.value?.name)
+  console.log('Current position:', currentPosition.value)
+  console.log('Execution stack:', [...executionStack.value])
+  console.log('Variables:', {...nvars})
+  
+  if (currentModule.value) {
+    // For step elements, we need to increment position manually after execution
+    if (currentModule.value.children[currentPosition.value] instanceof Step) {
+      currentPosition.value++
+    }
+    currentModule.value.executeNext()
+  } else {
+    console.log('No current module - reloading story')
+    loadStory()
+  }
+}
+
+onMounted(async () => {
+  console.log('Component mounted - loading story')
+  await loadStory()
 })
 </script>
 
 <template>
-	<div :style="{background: `url('https://media.greatbigphotographyworld.com/wp-content/uploads/2014/11/Landscape-Photography-steps.jpg')`}">
-		<div class="dialogue-box"></div>
-	</div>
+  <div class="story-container" @click="nextStep">
+    <div 
+      class="background" 
+      :style="{ 
+        backgroundImage: `url('${vars['Engine.bg_name']}')`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center'
+      }"
+    ></div>
+    
+    <div class="dialogue-box" v-if="vars['Engine.text'] || vars['Engine.char']">
+      <div v-if="vars['Engine.char']" class="character-name">
+        {{ vars['Engine.char'] || '...' }}
+      </div>
+      <div class="text-content">
+        {{ vars['Engine.text'] }}
+      </div>
+    </div>
+    
+    <div class="debug-info">
+      <div>Module: {{ currentModule?.name || 'none' }}</div>
+      <div>Position: {{ currentPosition }}</div>
+      <div>Stack: {{ executionStack.length }}</div>
+      <div v-if="Object.keys(nvars).length > 0">Vars: {{ nvars }}</div>
+    </div>
+  </div>
 </template>
 
-<style>
+<style scoped>
+.story-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.5s ease;
+}
+
 .dialogue-box {
-	hyphens: auto;
-	word-break: normal;
-	position: absolute;
-	bottom: 0;
-	width: 100%;
-	background-color: rgba(0, 0, 0, .9);
-	color: white;
-	padding: 1rem;
+  position: absolute;
+  bottom: 20px;
+  left: 10%;
+  right: 10%;
+  background-color: var(--black);
+/*  opacity: .85;*/
+  color: white;
+  padding: 24px;
+/*  border-radius: 5px;*/
+  border: 2px solid var(--dark_gray);
+/*  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);*/
+  box-shadow: 0 0 7px rgba(0, 0, 0, 0.2);
+  max-width: 800px;
+  margin: 0 auto;
+  animation: fadeIn 0.3s ease; /*cubic-bezier(0.3, 0.91, 0.66, 1.4);*/
+  z-index: 100;
+}
+
+.character-name {
+  position: absolute;
+  bottom: 3.2em;
+  padding: .7em;
+/*  border-radius: 5px;*/
+  border: 2px solid var(--dark_gray);
+  background-color: var(--black);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  font-weight: bold;
+  color: var(--white);
+  margin-bottom: 12px;
+  font-size: 1.6em;
+  text-shadow: 0 2px 4px rgba(255, 255, 255, 0.1);
+}
+
+.text-content {
+  line-height: 1.8;
+  font-size: 1.5em;
+  hyphens: auto;
+  word-break: normal;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.debug-info {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #4da6ff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 12px;
+  z-index: 1000;
+}
+
+@keyframes fadeIn {
+  from { 
+    opacity: 0; 
+    transform: translateY(-10px);
+/*      transform: rotate3d(1, 0, 0, 90deg);*/
+  }
+  to {
+    opacity: 1; 
+    transform: translateY(0);
+/*      transform: rotate3d(1, 0, 0, 0deg);*/
+  }
 }
 </style>
