@@ -13,8 +13,10 @@ const nvars = reactive({}) // Numeric variables
 const vars = reactive({
   'Engine.text': '', 
   'Engine.char': '', 
-  'Engine.bg_name': 'https://media.greatbigphotographyworld.com/wp-content/uploads/2014/11/Landscape-Photography-steps.jpg'
+  'Engine.bg_name': ''
 })
+const sprites = ref([])
+let msg_for_next = null
 
 class StoryElement {
   constructor(element) {
@@ -49,6 +51,12 @@ class StoryElement {
           break
         case 'go':
           this.children.push(new Go(child))
+          break
+        case 'sprite':
+          this.children.push(new Sprite(child))
+          break
+        case 'bg':
+          this.children.push(new BG(child))
           break
         default:
           console.warn(`Unknown element: ${className}`)
@@ -112,10 +120,45 @@ class Step extends StoryElement {
   }
 }
 
+class Sprite extends StoryElement {
+  async exec(mod) {
+    const spriteName = this.element.textContent.trim()
+    const pos = parseInt(this.element.getAttribute('pos')) || 0
+    const mode = this.element.getAttribute('mode') || 'ins'
+    
+    if (mode === 'ins') {
+      // Вставка спрайта
+      const spriteUrl = `${backendUrl}storage/asset_content/${route.params.id}/${spriteName}`
+      // Вставляем в позицию pos
+      sprites.value.splice(pos, 0, {
+        url: spriteUrl,
+        name: spriteName,
+        index: sprites.value.length // для z-index
+      })
+    } else if (mode === 'del') {
+      // Удаление спрайта
+      if (pos >= 0 && pos < sprites.value.length) {
+        sprites.value.splice(pos, 1)
+      }
+    }
+    return true
+  }
+}
+
 class TX extends StoryElement {
   async exec(mod) {
-    vars['Engine.text'] = this.element.textContent.trim()
+    const rawText = this.element.textContent.trim();
+    const processedText = replaceVariables(rawText);
+    vars['Engine.text'] = processedText;
     console.log('Text:', vars['Engine.text'])
+    return true
+  }
+}
+
+class BG extends StoryElement {
+  async exec(mod) {
+    vars['Engine.bg_name'] = this.element.textContent.trim()
+    console.log('Text:', vars['Engine.bg_name'])
     return true
   }
 }
@@ -194,7 +237,8 @@ class If extends StoryElement {
         if (this.elsePosition !== -1) {
           console.log(`Condition true, skipping else block at position ${this.elsePosition}`)
           // Set position to after the else block
-          currentPosition.value = this.elsePosition // This will be incremented by Module.executeNext
+          currentPosition.value = this.elsePosition - 1 // This will be incremented by Module.executeNext
+          msg_for_next = 'skip'
         }
       } else {
         // Skip to else block if it exists
@@ -235,6 +279,12 @@ class If extends StoryElement {
 class Else extends StoryElement {
   async exec(mod) {
     // Execute the content inside the else block
+    if (msg_for_next=='skip') {
+      msg_for_next = null
+      currentPosition.value++
+      await currentModule.value.executeNext()
+      return true
+    }
     for (const child of this.children) {
       await child.exec(mod)
     }
@@ -272,61 +322,105 @@ class Go extends StoryElement {
   }
 }
 
+function replaceVariables(text) {
+  if (!text) return '';
+  
+  return text.replace(/{([^{}]+)}/g, (match, variableName) => {
+    variableName = variableName.trim();
+    // Проверяем числовые переменные
+    if (variableName in nvars) {
+      return nvars[variableName];
+    }
+    // Проверяем строковые переменные
+    if (variableName in vars) {
+      return vars[variableName];
+    }
+    return match; // если переменная не найдена, оставляем как есть
+  });
+}
+
 // Store all modules
 const mods = ref({})
+
+async function downloadStory() {
+  const sid = localStorage.getItem('sid')
+  const storyId = route.params.id
+  
+  try {
+    const response = await fetch(`${backendUrl}storage/story_content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: parseInt(storyId),
+        sid: sid
+      })
+    })
+    
+    if (!response.ok) throw new Error('Failed to load story')
+    
+    const data = await response.json()
+    // Предполагаем, что контент в поле 'content'
+    return data.content || data
+  } catch (error) {
+    console.error('Error loading story:', error)
+    throw error
+  }
+}
 
 async function loadStory() {
   try {
     // Properly structured XML
-    rawXML.value = `
-<story>
-  <module name="main">
-    <step>
-      <char>Daun</char>
-      <tx>Hello! This is a test story.</tx>
-    </step>
-    <step>
-      <set a="1"></set>
-      <tx>Variable a has been set to 1</tx>
-    </step>
-    <if condition="a == 1">
-      <step>
-        <char>Megadaun</char>
-        <tx>The condition is true!</tx>
-      </step>
-    </if>
-    <else>
-      <step>
-        <tx>This would show if condition was false</tx>
-      </step>
-    </else>
-    <step>
-      <char></char>
-      <tx>Variable a = ${'{'}a{'}'}</tx>
-    </step>
-    <step>
-      <tx>Now going to the second module...</tx>
-    </step>
-    <go to="second"></go>
-    <step>
-      <tx>We're back from the second module!</tx>
-    </step>
-  </module>
-  <module name="second">
-    <step>
-      <char>Not Daun</char>
-      <tx>Welcome to the second module!</tx>
-    </step>
-    <step>
-      <set b="42"></set>
-      <tx>Variable b has been set to 42</tx>
-    </step>
-    <step>
-      <tx>Returning to main module...</tx>
-    </step>
-  </module>
-</story>
-`
+//     rawXML.value = `
+// <story>
+//   <module name="main">
+//     <step>
+//       <char>Daun</char>
+//       <tx>Hello! This is a test story.</tx>
+//     </step>
+//     <step>
+//       <set a="1"></set>
+//       <sprite>man.png</sprite>
+//       <tx>Variable a has been set to 1</tx>
+//     </step>
+//     <if condition="a == 1">
+//       <step>
+//         <char>Megadaun</char>
+//         <tx>The condition is true!</tx>
+//       </step>
+//     </if>
+//     <else>
+//       <step>
+//         <tx>This would show if condition was false</tx>
+//       </step>
+//     </else>
+//     <step>
+//       <char></char>
+//       <tx>Variable a = '{a}'</tx>
+//     </step>
+//     <step>
+//       <tx>Now going to the second module...</tx>
+//     </step>
+//     <go to="second"></go>
+//     <step>
+//       <tx>We're back from the second module!</tx>
+//     </step>
+//   </module>
+//   <module name="second">
+//     <step>
+//       <char>Not Daun</char>
+//       <tx>Welcome to the second module!</tx>
+//     </step>
+//     <step>
+//       <set b="42"></set>
+//       <tx>Variable b has been set to 42</tx>
+//     </step>
+//     <step>
+//       <tx>Returning to main module...</tx>
+//     </step>
+//   </module>
+// </story>
+// `
+    rawXML.value = await downloadStory()
     
     // Clear previous state
     nvars.a = undefined
@@ -341,6 +435,7 @@ async function loadStory() {
     if (error) {
       throw new Error(`XML parsing error: ${error.textContent}`)
     }
+    console.log(storyTree.value.children[0])
 
     // Parse modules
     const storyElement = storyTree.value.children[0]
@@ -398,29 +493,56 @@ onMounted(async () => {
 
 <template>
   <div class="story-container" @click="nextStep">
+    <!-- Фон -->
     <div 
       class="background" 
       :style="{ 
-        backgroundImage: `url('${vars['Engine.bg_name']}')`,
+        backgroundImage: `url(${backendUrl}storage/asset_content/${route.params.id}/${vars['Engine.bg_name']})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center'
       }"
     ></div>
     
+    <!-- Контейнер для спрайтов -->
+    <div class="sprites-container">
+      <div 
+        v-for="(sprite, index) in sprites" 
+        :key="index" 
+        class="sprite-item"
+        :style="{
+          zIndex: sprites.length - index, // Первый спрайт сверху, последний снизу
+          left: '50%',
+          transform: 'translateX(-50%)',
+          bottom: `${index * 5}px` // Чуть налезают друг на друга
+        }"
+      >
+        <img 
+          :src="sprite.url" 
+          :alt="sprite.name" 
+          @error="handleSpriteError(sprite, index)"
+          :style="{
+            maxHeight: '70vh', // Ограничиваем высоту
+            width: 'auto'
+          }"
+        />
+      </div>
+    </div>
+    
+    <!-- Диалоговое окно -->
     <div class="dialogue-box" v-if="vars['Engine.text'] || vars['Engine.char']">
       <div v-if="vars['Engine.char']" class="character-name">
         {{ vars['Engine.char'] || '...' }}
       </div>
-      <div class="text-content">
-        {{ vars['Engine.text'] }}
-      </div>
+      <div class="text-content" v-text="vars['Engine.text']"></div>
     </div>
     
+    <!-- Информация для отладки -->
     <div class="debug-info">
-      <div>Module: {{ currentModule?.name || 'none' }}</div>
-      <div>Position: {{ currentPosition }}</div>
-      <div>Stack: {{ executionStack.length }}</div>
-      <div v-if="Object.keys(nvars).length > 0">Vars: {{ nvars }}</div>
+      <div>История: {{ route.params.id }}</div>
+      <div>Модуль: {{ currentModule?.name || 'none' }}</div>
+      <div>Позиция: {{ currentPosition }}</div>
+      <div>Спрайты: {{ sprites.length }}</div>
+      <div v-if="Object.keys(nvars).length > 0">Переменные: {{ nvars }}</div>
     </div>
   </div>
 </template>
@@ -487,6 +609,7 @@ onMounted(async () => {
 }
 
 .debug-info {
+  display: none;
   position: absolute;
   top: 10px;
   right: 10px;
@@ -510,5 +633,49 @@ onMounted(async () => {
     transform: translateY(0);
 /*      transform: rotate3d(1, 0, 0, 0deg);*/
   }
+}
+
+.sprites-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 50; /* Между фоном (0) и диалогом (100) */
+}
+
+.sprite-item {
+  position: absolute;
+  bottom: 0;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  max-height: 70vh;
+}
+
+.sprite-item img {
+  display: block;
+  max-height: 100%;
+  width: auto;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.sprite-item.removing {
+  opacity: 0;
+  transform: translateX(-50%) translateY(20px);
+}
+
+@keyframes spriteAppear {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.sprite-item.appearing {
+  animation: spriteAppear 0.3s ease forwards;
 }
 </style>
