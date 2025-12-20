@@ -3,7 +3,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
-const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
+const backendUrl = import.meta.env.VITE_BACKEND_URL
+console.log(backendUrl)
 const rawXML = ref('')
 const storyTree = ref(null)
 const currentModule = ref(null)
