@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import Choice from "./components/Choice.vue"
 
 const route = useRoute()
 const backendUrl = import.meta.env.VITE_BACKEND_URL
@@ -18,6 +19,9 @@ const vars = reactive({
 })
 const sprites = ref([])
 let msg_for_next = null
+
+const choiceState = ref(null)
+const waitingForChoice = ref(false)
 
 class StoryElement {
   constructor(element) {
@@ -58,6 +62,9 @@ class StoryElement {
           break
         case 'bg':
           this.children.push(new BG(child))
+          break
+        case 'choice':
+          this.children.push(new ChoiceElement(child))
           break
         default:
           console.warn(`Unknown element: ${className}`)
@@ -215,7 +222,7 @@ class If extends StoryElement {
             this.elsePosition = j
             break
           } else if (nodeName === 'if') {
-            // Stop looking if we encounter another if (nested if-else not supported)
+            // Stop looking if we encounter another if
             break
           }
         }
@@ -231,26 +238,26 @@ class If extends StoryElement {
       
       if (conditionResult) {
         // Execute the content inside the if block
+        console.log(`If: executing ${this.children.length} children`)
         for (const child of this.children) {
           await child.exec(mod)
         }
+        
         // If we have an else block, we need to skip it
         if (this.elsePosition !== -1) {
-          console.log(`Condition true, skipping else block at position ${this.elsePosition}`)
-          // Set position to after the else block
-          currentPosition.value = this.elsePosition - 1 // This will be incremented by Module.executeNext
+          console.log(`If: condition true, setting skip flag for else at ${this.elsePosition}`)
           msg_for_next = 'skip'
         }
       } else {
-        // Skip to else block if it exists
+        // Condition is false
         if (this.elsePosition !== -1) {
-          console.log(`Condition false, jumping to else block at position ${this.elsePosition}`)
-          currentPosition.value = this.elsePosition - 1 // -1 because we'll increment after
-        } else {
-          // If there's no else block, just continue normally
-          // The position will be incremented by Module.executeNext
+          console.log(`If: condition false, jumping to else at ${this.elsePosition}`)
+          // Jump to the else block
+          currentPosition.value = this.elsePosition - 1 // -1 because Module.executeNext will increment
         }
+        // If no else block, just continue (position will be incremented)
       }
+      
       return true
     } catch (error) {
       console.error('Error evaluating condition:', this.condition, error)
@@ -279,13 +286,18 @@ class If extends StoryElement {
 
 class Else extends StoryElement {
   async exec(mod) {
-    // Execute the content inside the else block
-    if (msg_for_next=='skip') {
+    console.log(`Else: executing at position ${currentPosition.value}, msg_for_next = ${msg_for_next}`)
+    
+    // Check if we should skip this else block
+    if (msg_for_next === 'skip') {
+      console.log('Else: skipping because if condition was true')
       msg_for_next = null
-      currentPosition.value++
-      await currentModule.value.executeNext()
+      // Just return true, position will be incremented by Module.executeNext
       return true
     }
+    
+    // Execute the content inside the else block
+    console.log(`Else: executing ${this.children.length} children`)
     for (const child of this.children) {
       await child.exec(mod)
     }
@@ -320,6 +332,60 @@ class Go extends StoryElement {
       vars['Engine.text'] = `Error: Module "${targetModule}" not found`
       return true
     }
+  }
+}
+
+class ChoiceElement extends StoryElement {
+  constructor(element) {
+    super(element)
+    this.question = element.getAttribute('question') || ''
+    this.options = []
+    
+    // Parse option elements
+    for (let i = 0; i < element.children.length; i++) {
+      const child = element.children[i]
+      if (child.nodeName.toLowerCase() === 'option') {
+        this.options.push(child.textContent.trim())
+      }
+    }
+  }
+
+  async exec(mod) {
+    console.log(`Showing choice: ${this.question}`, this.options)
+    
+    // Set up the choice state - format as "question;option1;option2;..."
+    choiceState.value = {
+      question: this.question,
+      answers: `${this.question};${this.options.join(';')}`,
+      isActive: true
+    }
+    
+    // Don't auto-increment position - wait for user choice
+    return false
+  }
+}
+
+function handleChoiceSelected(choiceIndex) {
+  if (choiceState.value && choiceState.value.isActive) {
+    console.log(`User selected choice ${choiceIndex}`)
+    
+    // Set the choice variable
+    nvars['choice'] = choiceIndex
+    
+    // Clear choice state
+    choiceState.value.isActive = false
+    choiceState.value = null
+    
+    // Clear the text
+    vars['Engine.text'] = ''
+    vars['Engine.char'] = ''
+    
+    // Important: The ChoiceElement already prevented auto-increment by returning false
+    // So we need to increment position to move to the next element (the if block)
+    currentPosition.value++
+    
+    // Execute the next element (which should be the if block checking the choice)
+    currentModule.value.executeNext()
   }
 }
 
@@ -474,6 +540,12 @@ function nextStep() {
   console.log('Execution stack:', [...executionStack.value])
   console.log('Variables:', {...nvars})
   
+  // Don't advance if a choice is active
+  if (choiceState.value && choiceState.value.isActive) {
+    console.log('Choice is active, ignoring click')
+    return
+  }
+  
   if (currentModule.value) {
     // For step elements, we need to increment position manually after execution
     if (currentModule.value.children[currentPosition.value] instanceof Step) {
@@ -494,7 +566,7 @@ onMounted(async () => {
 
 <template>
   <div class="story-container" @click="nextStep">
-    <!-- Фон -->
+    <!-- Background -->
     <div 
       class="background" 
       :style="{ 
@@ -504,17 +576,17 @@ onMounted(async () => {
       }"
     ></div>
     
-    <!-- Контейнер для спрайтов -->
+    <!-- Sprites container -->
     <div class="sprites-container">
       <div 
         v-for="(sprite, index) in sprites" 
         :key="index" 
         class="sprite-item"
         :style="{
-          zIndex: sprites.length - index, // Первый спрайт сверху, последний снизу
+          zIndex: sprites.length - index,
           left: '50%',
           transform: 'translateX(-50%)',
-          bottom: `${index * 5}px` // Чуть налезают друг на друга
+          bottom: `${index * 5}px`
         }"
       >
         <img 
@@ -522,28 +594,40 @@ onMounted(async () => {
           :alt="sprite.name" 
           @error="handleSpriteError(sprite, index)"
           :style="{
-            maxHeight: '70vh', // Ограничиваем высоту
+            maxHeight: '70vh',
             width: 'auto'
           }"
         />
       </div>
     </div>
     
-    <!-- Диалоговое окно -->
-    <div class="dialogue-box" v-if="vars['Engine.text'] || vars['Engine.char']">
+    <!-- Dialogue box (hidden when choice is active) -->
+    <div 
+      class="dialogue-box" 
+      v-if="(vars['Engine.text'] || vars['Engine.char']) && (!choiceState || !choiceState.isActive)"
+    >
       <div v-if="vars['Engine.char']" class="character-name">
         {{ vars['Engine.char'] || '...' }}
       </div>
       <div class="text-content" v-text="vars['Engine.text']"></div>
     </div>
     
-    <!-- Информация для отладки -->
+    <!-- Choice component -->
+    <Choice
+      v-if="choiceState && choiceState.isActive"
+      @return="handleChoiceSelected"
+      :answers="choiceState.answers"
+      class="choice-overlay"
+    />
+    
+    <!-- Debug information -->
     <div class="debug-info">
       <div>История: {{ route.params.id }}</div>
       <div>Модуль: {{ currentModule?.name || 'none' }}</div>
       <div>Позиция: {{ currentPosition }}</div>
       <div>Спрайты: {{ sprites.length }}</div>
       <div v-if="Object.keys(nvars).length > 0">Переменные: {{ nvars }}</div>
+      <div v-if="choiceState && choiceState.isActive">Choice active: {{ choiceState.question }}</div>
     </div>
   </div>
 </template>
@@ -610,6 +694,7 @@ onMounted(async () => {
 }
 
 .debug-info {
+/*  display: block;*/
   display: none;
   position: absolute;
   top: 10px;
@@ -678,5 +763,35 @@ onMounted(async () => {
 
 .sprite-item.appearing {
   animation: spriteAppear 0.3s ease forwards;
+}
+
+.choice-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 150; /* Between sprites (50) and debug info (1000) */
+  pointer-events: auto; /* Allow clicking on choice buttons */
+}
+
+/* If the Choice component uses Bootstrap classes, we need to ensure it's visible */
+:deep(.btn-dark) {
+  background-color: var(--black) !important;
+  border-color: var(--dark_gray) !important;
+  color: var(--white) !important;
+}
+
+:deep(.btn-dark:hover) {
+  background-color: var(--dark_gray) !important;
+  border-color: var(--white) !important;
+}
+
+:deep(.min-vh-100) {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent overlay */
 }
 </style>
