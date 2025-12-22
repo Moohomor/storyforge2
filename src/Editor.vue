@@ -147,8 +147,23 @@ function JSONtoXML(obj) {
     }
   }
   
+  // Special handling for choice - always use opening/closing tags with question attribute
+  if (tagName === 'choice') {
+    // Ensure question attribute is included
+    if (!attributesStr.includes('question=') && obj.attributes?.question) {
+      const questionValue = obj.attributes.question.value || obj.attributes.question.nodeValue || ''
+      attributesStr += ` question="${questionValue}"`
+    }
+    return `${' '.repeat(obj.spaces)}<${tagName}${attributesStr}>${obj.content || ''}`
+  }
+  
+  // For option tags, always use opening/closing tags
+  if (tagName === 'option') {
+    return `${' '.repeat(obj.spaces)}<${tagName}${attributesStr}>${obj.content || ''}</${tagName}>`
+  }
+  
   // Handle content tags - these should never be self-closing if they have content
-  const contentTags = ['tx', 'bg', 'char', 'sprite', 'go', 'set', 'choice']
+  const contentTags = ['tx', 'bg', 'char', 'sprite', 'go', 'set', 'choice', 'option']
   const hasContent = obj.content && obj.content.trim() !== ''
   
   // If it's a content tag and has content, always use opening/closing tags
@@ -157,7 +172,7 @@ function JSONtoXML(obj) {
   }
   
   // Handle self-closing tags - ONLY if they have no content and are in the self-closing list
-  const isSelfClosingTag = ['sprite', 'bg', 'char'].includes(tagName)
+  const isSelfClosingTag = ['sprite', 'bg', 'char', 'set'].includes(tagName)
   
   // Only self-close if it's one of the special tags AND has no content AND is marked as single
   if (isSelfClosingTag && !hasContent && obj.single) {
@@ -179,6 +194,54 @@ const sidebarOpen = ref(false)
 const burgerMenuOpen = ref(false)
 const isLoading = ref(true)
 
+// Function to get parent tag for a step
+const getParentTag = (moduleName, stepIndex) => {
+  if (!mods.value[moduleName]) return ''
+  
+  const steps = mods.value[moduleName]
+  const currentStep = steps[stepIndex]
+  if (!currentStep) return ''
+  
+  // Find the nearest opening tag with less indentation that's not closed yet
+  let parentTag = ''
+  let openTags = []
+  
+  for (let i = 0; i <= stepIndex; i++) {
+    const step = steps[i]
+    
+    if (step.closing) {
+      // Remove from open tags when we encounter closing tag
+      const tagName = step.tag.startsWith('/') ? step.tag.substring(1) : step.tag
+      const index = openTags.lastIndexOf(tagName)
+      if (index !== -1) {
+        openTags.splice(index, 1)
+      }
+    } else if (!step.tag.startsWith('/') && step.tag !== '') {
+      // Add to open tags when we encounter opening tag
+      openTags.push(step.tag)
+    }
+    
+    if (i === stepIndex) {
+      // Current step's parent is the last open tag (if any)
+      if (openTags.length > 1) {
+        parentTag = openTags[openTags.length - 2] || ''
+      }
+    }
+  }
+  
+  return parentTag
+}
+
+// Check if tag can be placed at current level
+const canPlaceTagHere = (tag, spaces) => {
+  const restrictedTags = ['tx', 'sprite', 'bg', 'char', 'option']
+  const tagName = tag.replace('/', '')
+  
+  // Options can only be placed inside choice tags (handled by parentTag in Step.vue)
+  // For now, just check the indentation rule for other restricted tags
+  return !restrictedTags.includes(tagName) || spaces >= 4
+}
+
 // Add/Remove functionality
 const addStep = (moduleName, stepIndex) => {
   if (!mods.value[moduleName]) {
@@ -192,10 +255,16 @@ const addStep = (moduleName, stepIndex) => {
     return
   }
   
-  const currentTag = currentStep.tag.replace('/', '')
+  const parentTag = getParentTag(moduleName, stepIndex)
+  let newTag = 'tx'
+  
+  // If inside a choice, default to option tag
+  if (parentTag === 'choice') {
+    newTag = 'option'
+  }
   
   const newStep = {
-    tag: 'tx',
+    tag: newTag,
     content: '',
     spaces: currentStep.spaces,
     single: true,
@@ -221,6 +290,45 @@ const removeStep = (moduleName, stepIndex) => {
   }
 }
 
+// Add option inside choice
+const addOptionInsideChoice = (moduleName, stepIndex) => {
+  if (!mods.value[moduleName]) {
+    console.error(`Module "${moduleName}" not found`)
+    return
+  }
+  
+  const currentStep = mods.value[moduleName][stepIndex]
+  if (!currentStep) {
+    console.error(`Step at index ${stepIndex} not found in module "${moduleName}"`)
+    return
+  }
+  
+  // Find where to insert the option (inside the choice)
+  let insertIndex = stepIndex + 1
+  const steps = mods.value[moduleName]
+  
+  // Look for the next closing choice tag
+  while (insertIndex < steps.length) {
+    if (steps[insertIndex].tag === '/choice') {
+      break
+    }
+    insertIndex++
+  }
+  
+  const newOption = {
+    tag: 'option',
+    content: '',
+    spaces: currentStep.spaces + 4, // Indent options inside choice
+    single: true,
+    closing: false,
+    attributes: {}
+  }
+  
+  const newSteps = [...steps]
+  newSteps.splice(insertIndex, 0, newOption)
+  mods.value[moduleName] = newSteps
+}
+
 // Module management
 const addModule = () => {
   const moduleName = prompt('Enter module name:', `module_${Object.keys(mods.value).length + 1}`)
@@ -243,7 +351,7 @@ const addModule = () => {
       closing: true
     }, {
       tag: '/module',
-      spaces: 2,
+      spaces: 0,
       single: true,
       closing: true
     }]
@@ -436,13 +544,6 @@ onMounted(async () => {
   }
 })
 
-// Check if tag can be placed at current level
-const canPlaceTagHere = (tag, spaces) => {
-  const restrictedTags = ['tx', 'sprite', 'bg', 'char']
-  const tagName = tag.replace('/', '')
-  return !restrictedTags.includes(tagName) || spaces >= 4
-}
-
 // Toggle burger menu
 const toggleBurgerMenu = () => {
   burgerMenuOpen.value = !burgerMenuOpen.value
@@ -556,8 +657,10 @@ const safeUpdateStep = (moduleName, stepIndex, updatedJson) => {
                   :module-name="moduleName" 
                   :step-index="stepIndex"
                   :can-place-tag="canPlaceTagHere"
+                  :parent-tag="getParentTag(moduleName, stepIndex)"
                   @add-step="addStep(moduleName, stepIndex)"
                   @remove-step="removeStep(moduleName, stepIndex)"
+                  @add-option="addOptionInsideChoice(moduleName, stepIndex)"
                   @update-step="(updatedJson) => safeUpdateStep(moduleName, stepIndex, updatedJson)"
                 />
               </li>
@@ -570,6 +673,7 @@ const safeUpdateStep = (moduleName, stepIndex, updatedJson) => {
 </template>
 
 <style>
+/* Keep all existing Editor.vue styles exactly as they are */
 .loading-container {
   display: flex;
   flex-direction: column;

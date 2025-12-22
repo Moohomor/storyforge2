@@ -1,7 +1,7 @@
 <script setup>
 import { defineProps, ref, onMounted, defineEmits, watch, computed, nextTick } from 'vue'
 
-const emit = defineEmits(['add-step', 'remove-step', 'update-step'])
+const emit = defineEmits(['add-step', 'remove-step', 'update-step', 'add-option'])
 
 const props = defineProps({
   json: {
@@ -19,6 +19,10 @@ const props = defineProps({
   canPlaceTag: {
     type: Function,
     required: true
+  },
+  parentTag: {
+    type: String,
+    default: ''
   }
 })
 
@@ -32,6 +36,7 @@ const tags = [
   ['Background', 'bg'], 
   ['Character', 'char'], 
   ['Choice', 'choice'],
+  ['Option', 'option'],
   ['Step', 'step'], 
   ['If condition', 'if'], 
   ['Else', 'else'], 
@@ -39,7 +44,7 @@ const tags = [
   ['Set variable', 'set']
 ]
 
-const selfClosingTags = ['sprite', 'bg', 'char']
+const selfClosingTags = ['sprite', 'bg', 'char', 'set']
 const isSelfClosing = ref(false)
 
 onMounted(() => {
@@ -63,6 +68,11 @@ const initializeFromProps = () => {
         const attr = props.json.attributes[attrName]
         attributes.value[attrName] = attr.value || attr.nodeValue || ''
       }
+    }
+    
+    // Ensure choice has question attribute
+    if (tag.value === 'choice' && !attributes.value.question) {
+      attributes.value.question = ''
     }
   } catch (error) {
     console.error('Error initializing from props:', error)
@@ -104,6 +114,20 @@ const handleTagChange = (newTag) => {
     if (!props.canPlaceTag(newTag, props.json.spaces)) {
       alert(`"${newTag}" can only be placed inside a step block (indented at least 4 spaces)`)
       tag.value = props.json.tag.replace('/', '') // Revert to previous tag without slash
+      return
+    }
+    
+    // Special handling for choice and option tags
+    if (newTag === 'choice') {
+      // Ensure question attribute exists
+      if (!attributes.value.question) {
+        attributes.value.question = ''
+      }
+      // Clear content for choice (uses question attribute instead)
+      content.value = ''
+    } else if (newTag === 'option' && props.parentTag !== 'choice') {
+      alert('Option tags can only be placed inside choice tags!')
+      tag.value = props.json.tag.replace('/', '')
       return
     }
     
@@ -159,7 +183,7 @@ const updateStepData = () => {
     
     // Update attributes
     for (const attrName in attributes.value) {
-      if (attributes.value[attrName]) {
+      if (attributes.value[attrName] !== undefined && attributes.value[attrName] !== '') {
         updatedJson.attributes[attrName] = { 
           name: attrName, 
           value: attributes.value[attrName],
@@ -199,7 +223,6 @@ const addAttribute = () => {
     }
   } catch (error) {
     console.error('Error in addAttribute:', error)
-    console.error('New attr name:', newAttrName)
   }
 }
 
@@ -219,10 +242,17 @@ const filteredTags = computed(() => {
   if (isClosing.value) {
     // For closing tags, only show tags that can be closed
     return tags.filter(([_, value]) => 
-      ['step', 'if', 'else', 'module'].includes(value)
+      ['step', 'if', 'else', 'module', 'choice'].includes(value)
     )
   }
-  return tags
+  
+  // If inside a choice, only show option tag
+  if (props.parentTag === 'choice') {
+    return tags.filter(([_, value]) => value === 'option')
+  }
+  
+  // Filter out option tag if not inside choice
+  return tags.filter(([_, value]) => value !== 'option')
 })
 
 const showSelfClosingToggle = computed(() => {
@@ -230,8 +260,27 @@ const showSelfClosingToggle = computed(() => {
 })
 
 const showContentInput = computed(() => {
-  const contentTags = ['tx', 'bg', 'char', 'sprite', 'go', 'set']
+  const contentTags = ['tx', 'bg', 'char', 'sprite', 'go', 'set', 'option']
   return contentTags.includes(tag.value) && !isClosing.value
+})
+
+const showQuestionEditor = computed(() => {
+  return tag.value === 'choice' && !isClosing.value
+})
+
+const getContentPlaceholder = () => {
+  if (tag.value === 'tx') return 'Enter text...'
+  if (tag.value === 'bg') return 'Background path...'
+  if (tag.value === 'char') return 'Character path...'
+  if (tag.value === 'sprite') return 'Sprite path...'
+  if (tag.value === 'go') return 'Module name...'
+  if (tag.value === 'set') return 'Variable value...'
+  if (tag.value === 'option') return 'Option text...'
+  return 'Value...'
+}
+
+const showAddOptionButton = computed(() => {
+  return tag.value === 'choice' && !isClosing.value
 })
 </script>
 
@@ -283,33 +332,24 @@ const showContentInput = computed(() => {
     </div>
   </div>
   
+  <!-- Special editor for choice question -->
+  <div v-if="showQuestionEditor" class="question-editor">
+    <span class="attr-label">question:</span>
+    <input 
+      type="text" 
+      v-model="attributes.question" 
+      @change="handleAttributeChange('question', $event.target.value)"
+      placeholder="Enter question for the choice..."
+    />
+  </div>
+  
   <!-- Content input for relevant tags -->
   <input 
     v-if="showContentInput" 
     v-model="content"
     @change="handleContentChange(content)"
-    :placeholder="tag === 'tx' ? 'Enter text...' : 
-                 tag === 'bg' ? 'Background path...' : 
-                 tag === 'char' ? 'Character path...' : 
-                 tag === 'sprite' ? 'Sprite path...' : 
-                 'Value...'"
+    :placeholder="getContentPlaceholder()"
   />
-  
-  <!-- Attribute editor -->
-  <div class="attributes-editor">
-    <div class="attribute-item" v-for="(value, name) in attributes" :key="name">
-      <span class="attr-label">{{ name }}:</span>
-      <input 
-        type="text" 
-        v-model="attributes[name]" 
-        @change="handleAttributeChange(name, $event.target.value)"
-        :placeholder="name"
-        :disabled="isClosing"
-      />
-      <button @click="removeAttribute(name)" class="remove-btn" :disabled="isClosing">×</button>
-    </div>
-    <button @click="addAttribute" class="add-attr-btn" :disabled="isClosing || tag === 'module'">+ Add Attribute</button>
-  </div>
   
   <!-- Special case for 'if' tag to show cond attribute -->
   <div v-if="tag === 'if' && !isClosing" class="cond-editor">
@@ -322,10 +362,39 @@ const showContentInput = computed(() => {
     />
   </div>
   
+  <!-- Attribute editor -->
+  <div class="attributes-editor">
+    <div class="attribute-item" v-for="(value, name) in attributes" :key="name">
+      <!-- Hide question attribute for choice (handled separately) -->
+      <template v-if="!(tag === 'choice' && name === 'question')">
+        <span class="attr-label">{{ name }}:</span>
+        <input 
+          type="text" 
+          v-model="attributes[name]" 
+          @change="handleAttributeChange(name, $event.target.value)"
+          :placeholder="name"
+          :disabled="isClosing"
+        />
+        <button @click="removeAttribute(name)" class="remove-btn" :disabled="isClosing">×</button>
+      </template>
+    </div>
+    <button @click="addAttribute" class="add-attr-btn" :disabled="isClosing || tag === 'module'">+ Add Attribute</button>
+  </div>
+  
   <!-- Action buttons -->
   <div class="step-actions">
     <button @click="$emit('remove-step')" class="action-btn remove-btn" title="Remove step">−</button>
     <button @click="$emit('add-step')" class="action-btn add-btn" title="Add step">+</button>
+    
+    <!-- Add option button for choice tags -->
+    <button 
+      v-if="showAddOptionButton" 
+      @click="$emit('add-option')" 
+      class="action-btn add-option-btn" 
+      title="Add option inside choice"
+    >
+      + Option
+    </button>
   </div>
 </div>  
 </template>
@@ -428,6 +497,17 @@ select:focus, input[type="text"]:focus {
   white-space: nowrap;
 }
 
+.question-editor, .cond-editor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 8px;
+}
+
+.question-editor input, .cond-editor input {
+  min-width: 200px;
+}
+
 .step-actions {
   display: flex;
   gap: 4px;
@@ -444,7 +524,7 @@ select:focus, input[type="text"]:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 14px;
   transition: all 0.2s ease;
 }
 
@@ -466,6 +546,18 @@ select:focus, input[type="text"]:focus {
   background-color: #c82333;
 }
 
+.add-option-btn {
+  width: auto;
+  padding: 0 8px;
+  background-color: #ff9800;
+  color: white;
+  font-size: 12px;
+}
+
+.add-option-btn:hover {
+  background-color: #e68900;
+}
+
 .add-attr-btn {
   background-color: #17a2b8;
   color: white;
@@ -481,13 +573,6 @@ select:focus, input[type="text"]:focus {
   background-color: #138496;
 }
 
-.cond-editor {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 0 8px;
-}
-
 .self-closing-toggle {
   display: flex;
   align-items: center;
@@ -500,5 +585,15 @@ select:focus, input[type="text"]:focus {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.choice-container {
+  border-left: 3px solid #ff9800;
+  background-color: #fff8e1;
+}
+
+.option-container {
+  border-left: 3px solid #4caf50;
+  background-color: #f1f8e9;
 }
 </style>
