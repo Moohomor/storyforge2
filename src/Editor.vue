@@ -534,6 +534,7 @@ const safeUpdateStep = (moduleName, stepIndex, updatedJson) => {
           </div>
         </div>
         <h1>Story Editor</h1>
+        <h2>ID: {{route.params.id}}</h2>
         <button @click="uploadStory" class="upload-btn">📤 Upload</button>
       </div>
       
