@@ -3,13 +3,14 @@ import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
+const backendUrl = import.meta.env.VITE_BACKEND_URL
 
 onMounted(() => {
   const burgerMenu = document.querySelector('.burgerMenu')
   const hamMenu = document.querySelector('.hamMenu')
   const profilePic = document.querySelector('#profilePic')
   const LogoHeader = document.querySelector('#LogoHeader')
-  
+
   if (burgerMenu) {
     burgerMenu.addEventListener('click', () => {
       burgerMenu.classList.toggle('active')
@@ -18,7 +19,27 @@ onMounted(() => {
       LogoHeader.classList.toggle('active')
     })
   }
+
+  const sid = localStorage.getItem('sid')
+  const AuthBtn = document.querySelector('.AuthBtn')
+  const RegBtn = document.querySelector('.RegBtn')
+  const ProfBtn = document.querySelector('.ProfBtn')
+  if (sid !== null) {
+    AuthBtn.classList.toggle('NoneDisp')
+    RegBtn.classList.toggle('NoneDisp')
+  }
+  if (sid === null) {
+    ProfBtn.classList.toggle('NoneDisp')
+  }
 })
+async function logout() {
+  const response = await fetch(`${backendUrl}auth/logout`, {
+      method: 'POST',
+      body: JSON.stringify({
+        sid: localStorage.getItem('sid'),
+      }),
+    });
+}
 </script>
 
 <template>
@@ -28,15 +49,24 @@ onMounted(() => {
         <span></span>
         <span></span>
       </div>
-    <a href="App.vue"><img src="/src/components/images/logo.svg" alt="лого" id="LogoHeader"></a>
-    <a href="#"><img src="/src/components/images/profilepic.svg" alt="Профиль" id="profilePic"></a>
+    <a href="/"><img src="/src/components/images/logo.svg" alt="лого" id="LogoHeader"></a>
+    <a href="/auth"><img src="/src/components/images/profilepic.svg" alt="Профиль" id="profilePic"></a>
     <nav class="hamMenu">
       <img src="/src/components/images/logo.svg" alt="лого" id="LogoBurgerMenu">
-      <li>
-        <a href="App.vue" ><ul id="homeBtn">Главная</ul></a>
-        <a href="#"><ul>Редактор</ul></a>
-        <a href="#"><ul>Авторизация</ul></a>
-      </li>
+      <ul>
+        <li>
+          <router-link to="/" active-class="Active">Главная</router-link>
+        </li>
+        <li>
+          <span @click="logout" class="ProfBtn" active-class="Active" style="color: white;">Выйти</span>
+        </li>
+        <li>
+          <router-link to="/auth" class="AuthBtn" active-class="Active">Авторизация</router-link>
+        </li>
+        <li>
+          <router-link to="/register" class="RegBtn" active-class="Active">Регистрация</router-link>
+        </li>
+      </ul>
     </nav>
   </header>
   <main>
@@ -56,6 +86,9 @@ onMounted(() => {
 body{
   display: flex ;
   flex-direction: column;
+}
+main{
+  min-height: 90vh;
 }
 html:root{
   font-size: 62.5%;
@@ -77,6 +110,11 @@ h1{
   margin: 0;
   color: var(--white);
 }
+.AuthH1{
+  font-size: 4rem;
+  text-align:center;
+  margin-top: 9rem;
+}
 h2{
   margin: 0;
   color: var(--white);
@@ -88,6 +126,23 @@ h3{
 p{
   margin: 0;
   color: var(--white);
+}
+
+.NoneDisp{
+  display: none;
+}
+
+.novelItem{
+  width: 248px;
+  height: 175px;
+  background: linear-gradient(var(--dark_gray) 66%, var(--semi_dark_gray) 100%);
+  box-shadow: 0px 4px 9.3px 3px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.NovelItemPic{
+  margin-top: 0.7rem;
 }
 /* HEADER */
 #LogoHeader{
@@ -144,16 +199,18 @@ header>.burgerMenu.active span:nth-child(3){
   top: 50%;
   transform: translate(-50%, -50%) rotate(-45deg);
 }
-header>a:hover{
-  opacity: 50%;
-  cursor: pointer;
-}
 #profilePic{
   margin-right: 1.4rem;
   height: 4.2rem;
 }
 #profilePic.active{
   display: none;
+}
+#profilePic:hover{
+  opacity: 50%;
+}
+#LogoHeader:hover{
+  opacity: 50%;
 }
 .hamMenu{
   background-color: var(--dark_gray);
@@ -175,30 +232,27 @@ header>a:hover{
   top: 0;
   z-index: 1;
 }
-.hamMenu>li{
+.hamMenu>ul>li>a.Active{
+  color: var(--orange);
+  width: fit-content;
+  padding: 0;
+  transition: .2s ease;
+}
+.hamMenu>ul{
   list-style-type: none;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
-.hamMenu>li>a{
+.hamMenu>ul>li>a{
   text-decoration: none;
   color: var(--white);
 }
-.hamMenu>li>a>ul{
+.hamMenu>ul>li{
   padding: 0;
   margin: 4rem 0 0 0;
 }
-.hamMenu>li>a:hover{
-  opacity: 50%;
-}
-#homeBtn{
-  color: var(--orange);
-  width: fit-content;
-  padding: 0;
-}
-
-#homeBtn::after{
+.Active::after{
   content: "";
   display: block;
   background: var(--orange);
@@ -270,49 +324,28 @@ main{
 }
 #authContainer{
   width: 100%;
-  height: 18rem;
+  height: 15rem;
   background-color: var(--dark_gray);
   display: flex;
-  flex-direction: column;
   align-items: center;
   margin-bottom: 5.2rem;
-}
-#authContainer>h3{
-  text-align: center;
-  font-size: 1.3rem;
-  padding-top: 1.8rem;
-}
-.authInput{
-  width: 24rem;
-  height: 3rem;
-  align-self: center;
-  opacity: 50%;
-  background-color: var(--semi_light_gray);
-  color: var(--white);
-  outline: none;
-  border-radius: 0.2rem;
-  border: none;
-}
-.authInput::placeholder{
-  color: var(--white);
-}
-#login{
-  margin-top: 2rem;
-}
-#password{
-  margin-top: 1.5rem;
-  margin-bottom: 1rem;
+  justify-content: center;
 }
 #authContainer>p{
   margin-top: 0.6rem;
-  font-size: 0.6rem;
+  font-size: 1.5rem;
   margin-bottom: 0.8rem;
+  width: 22.4rem;
+}
+#authContainer>p>a{
+  text-decoration: none;
+  color: var(--orange);
 }
 #authContainer>p>span>a{
   color: var(--orange);
   text-decoration: none;
 }
-#authContainer>p>span>a:hover{
+#authContainer>p>a:hover{
   opacity: 50%;
 }
 #logBtn{
@@ -329,6 +362,16 @@ main{
 }
 
 /* NOVELS SECTION */
+.novels{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 10rem;
+}
+.novels>h2{
+  align-self: flex-start;
+  margin: 1.5rem 0 1.5rem 1.5rem;
+}
 #navPanelTwo{
   background-color: var(--semi_dark_gray_two);
   display: flex;
@@ -340,22 +383,177 @@ main{
 footer{
   background-color: var(--dark_gray);
   min-width: 32rem;
-  height: 8rem;
-  margin-top: 2.8rem;
+  height: 15rem;
+  margin-top: 5rem;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-direction: column;
-}
-#logoFooter{
-  align-self: center;
+  margin-top: auto;
 }
 footer>p{
   font-size: 0.9rem;
 }
-#errorEmptyContent{
-  margin: 15rem 0 15rem 0rem;
-  font-size: 3rem;
-  text-align: center;
+
+
+/* Auth.vue */
+.AuthContainer{
+  width: 100%;
+  height: 28rem;
+  background-color: var(--dark_gray);
+  margin-bottom: 10rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.AuthContainer>form{
+  display: flex;
+  flex-direction: column;
+}
+.AuthContainer>form>label{
+  display: block;
+  color: var(--white);
+  font-size: 1.6rem;
+}
+.AuthContainer>form>#pasLb{
+  margin-top: 2rem;
+}
+.AuthContainer>form>input{
+  display: block;
+  width: 27.6rem;
+  height: 4.4rem;
+  font-size: 1.6rem;
+  background-color: var(--light_gray);
+  border: none;
+  padding: 0;
+  color: var(--white);
+}
+.AuthContainer>p>a{
+  text-decoration: none;
+  color: var(--orange);
+}
+.AuthContainer>p>a:hover{
+  opacity: 50%;
+}
+.AuthContainer>p{
+  margin-top: 2rem;
+}
+.AuthContainer>form>.authBtn{
+  width: 12rem;
+  height: 3rem;
+  color: var(--white);
+  background-color: var(--orange);
+  align-self: center;
+  border-radius: 0.5rem;
+  font-size: 1.6rem;
+  border: none;
+  margin-top: 1.8rem;
+}
+
+.AuthContainer>form>.authBtn:hover{
+  cursor: pointer;
+  background-color: var(--semi_dark_gray);
+}
+.AuthContainer>form>.authBtn:active{
+  background-color: var(--orange);
+  box-shadow: inset 0px 6px 4px rgba(0, 0, 0, 0.34);
+}
+
+/* register.vue */
+.RegisterContainer{
+  width: 100%;
+  height: 34.5rem;
+  background-color: var(--dark_gray);
+  margin-bottom: 10rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.RegisterContainer>form{
+  display: flex;
+  flex-direction: column;
+}
+.RegisterContainer>form>label{
+  display: block;
+  color: var(--white);
+  font-size: 1.6rem;
+}
+.RegisterContainer>form>#pasLb{
+  margin-top: 2rem;
+}
+.RegisterContainer>form>input{
+  display: block;
+  width: 27.6rem;
+  height: 4.4rem;
+  font-size: 1.6rem;
+  background-color: var(--light_gray);
+  border: none;
+  padding: 0;
+  color: var(--white);
+}
+.RegisterContainer>p>a{
+  text-decoration: none;
+  color: var(--orange);
+}
+.RegisterContainer>p>a:hover{
+  opacity: 50%;
+}
+.RegisterContainer>p{
+  margin-top: 2rem;
+}
+.RegisterContainer>form>.authBtn{
+  width: 21.8rem;
+  height: 3rem;
+  color: var(--white);
+  background-color: var(--orange);
+  align-self: center;
+  border-radius: 0.5rem;
+  font-size: 1.6rem;
+  border: none;
+  margin-top: 1.8rem;
+}
+.RegisterContainer>form>.authBtn:hover{
+  cursor: pointer;
+  background-color: var(--semi_dark_gray);
+}
+.RegisterContainer>form>.authBtn:active{
+  background-color: var(--orange);
+  box-shadow: inset 0px 6px 4px rgba(0, 0, 0, 0.34);
+}
+
+/* library.vue */
+.myNovelItem{
+  background-color: var(--light_gray);
+  width: 100%;
+  height: 6rem;
+}
+
+#ContinueContainer{
+  width: 100%;
+  height: 15rem;
+  background-color: var(--dark_gray);
+  display: flex;
+  align-items: center;
+  margin-bottom: 5.2rem;
+  justify-content: center;
+}
+#ContinueContainer>p{
+  margin-top: 0.6rem;
+  font-size: 1.5rem;
+  margin-bottom: 0.8rem;
+  width: 23.4rem;
+}
+#ContinueContainer>p>a{
+  text-decoration: none;
+  color: var(--orange);
+}
+#ContinueContainer>p>span>a{
+  color: var(--orange);
+  text-decoration: none;
+}
+#ContinueContainer>p>a:hover{
+  opacity: 50%;
 }
 </style>
